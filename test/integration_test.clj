@@ -2,6 +2,7 @@
   (:require [clojure.test :refer :all]
             [clojure.spec :as s]
             [clojure.spec.gen :as gen]
+            [clojure.set :refer [subset?]]
             [clojure.java.jdbc :as jdbc]
             [ring.adapter.jetty :as jetty]
             [clj-http.client :as client]
@@ -49,6 +50,16 @@
 
 ;; generator for sane model of database
 
+(defn animals-stock-consistency
+  [database]
+  (subset? (set (map ::animal-id (::animals-in-stocks database)))
+           (set (map ::animal-id (::animals database)))))
+
+(defn stores-stock-consistency
+  [database]
+  (subset? (set (map ::store-id (::animals-in-stocks database)))
+           (set (map ::store-id (::stores database)))))
+
 (s/def ::model
   (s/cat :animals (s/coll-of ::animal :min-count 3)
          :stores (s/coll-of ::store :min-count 3)
@@ -70,13 +81,12 @@
                              ::quantity quantity})})
    (s/gen ::model)))
 
-;; Exercise left for the eager reader: add consistency between animals,
-;; stores and animals-in-stock to the database spec. That is, if a store
-;; or animal id is references in animals-in-stocks it must also be
-;; present in the animals and stores collections.
 (s/def ::database
   (s/spec
-   (s/keys :req [::animals ::stores ::animals-in-stocks])
+   (s/and
+    (s/keys :req [::animals ::stores ::animals-in-stocks])
+    animals-stock-consistency
+    stores-stock-consistency)
    :gen gen-database))
 
 
