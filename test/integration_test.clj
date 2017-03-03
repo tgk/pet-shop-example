@@ -165,9 +165,6 @@
                                     (::animals-in-stocks database))
             response (client/get (str "http://localhost:8111/stores/" (::store-id store) "/animals"))
             json-body (parse-string (:body response))]
-        (testing "The number of different animals in stock match"
-          (is (= (count expected-stocks)
-                 (count json-body))))
         (testing "The content of the returned animals"
           (is (= (set (for [stock expected-stocks]
                         (let [animal (first (filter #(= (::animal-id stock) (::animal-id %)) (::animals database)))]
