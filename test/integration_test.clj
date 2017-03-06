@@ -69,16 +69,24 @@
   [xs ys]
   (for [x xs, y ys] [x y]))
 
+(defn animals-in-stocks
+  [animals stores quantities]
+  (for [[[animal store] quantity] (map
+                                   vector
+                                   (cart-prod animals stores)
+                                   quantities)]
+    {::animal-id (::animal-id animal)
+     ::store-id (::store-id store)
+     ::quantity quantity}))
+
 (defn gen-database
   []
   (gen/fmap
    (fn [[animals stores quantities]]
      {::animals animals
       ::stores stores
-      ::animals-in-stocks (for [[[animal store] quantity] (map vector (cart-prod animals stores) quantities)]
-                            {::animal-id (::animal-id animal)
-                             ::store-id (::store-id store)
-                             ::quantity quantity})})
+      ::animals-in-stocks (animals-in-stocks
+                           animals stores quantities)})
    (s/gen ::model)))
 
 (s/def ::database
@@ -156,20 +164,40 @@
 
 ;; TODO: some of this gritty code could be nicer with specter
 
+(defn expected-stocks
+  [store database]
+  (filter #(= (::store-id store) (::store-id %))
+          (::animals-in-stocks database)))
+
+(defn find-animal
+  [animal-id database]
+  (first (filter #(= animal-id (::animal-id %))
+                 (::animals database))))
+
+(defn query-stocks-in-mem
+  [store database]
+  (for [stock (expected-stocks store database)]
+    (let [animal (find-animal (::animal-id stock) database)]
+      {"name" (::animal-name animal)
+       "cuddly" (::cuddly animal)
+       "quantity" (::quantity stock)})))
+
+(defn query-stocks-remote
+  [store-id]
+  (let [url (str "http://localhost:8111/stores/"
+                 store-id
+                 "/animals")
+        response (client/get url)]
+    (parse-string (:body response))))
+
 (deftest animals-in-store-test
   (doseq [database (map first (s/exercise ::database 3))]
     (prepare-sql-database! database)
     (start-jetty!)
     (doseq [store (::stores database)]
-      (let [expected-stocks (filter #(= (::store-id store) (::store-id %))
-                                    (::animals-in-stocks database))
-            response (client/get (str "http://localhost:8111/stores/" (::store-id store) "/animals"))
-            json-body (parse-string (:body response))]
+      (let [expected (query-stocks-in-mem store database)
+            received (query-stocks-remote (::store-id store))]
         (testing "The content of the returned animals"
-          (is (= (set (for [stock expected-stocks]
-                        (let [animal (first (filter #(= (::animal-id stock) (::animal-id %)) (::animals database)))]
-                          {"name" (::animal-name animal)
-                           "cuddly" (::cuddly animal)
-                           "quantity" (::quantity stock)})))
-                 (set json-body))))))
+          (is (= (set expected)
+                 (set received))))))
     (stop-jetty!)))
